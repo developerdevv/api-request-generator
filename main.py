@@ -1,3 +1,12 @@
+import hashlib
+import hmac
+import json
+import uuid
+from datetime import datetime, timezone
+
+import httpx
+from pydantic import field_validator
+
 import secrets
 from fastapi import Depends, Security
 from fastapi.security import APIKeyHeader
@@ -37,6 +46,14 @@ def require_api_key(key: str = Security(api_key_header)):
 
 class PromptIn(BaseModel):
     prompt: str
+    webhook_url: Optional[str] = None
+
+    @field_validator("webhook_url")
+    @classmethod
+    def must_be_https(cls, v):
+        if v and not v.startswith("https://"):
+            raise ValueError("webhook_url must start with https://")
+        return v
 
 
 class KeyValue(BaseModel):
@@ -70,6 +87,30 @@ MODELS = [
 def health():
     return {"status": "ok"}
 
+def send_webhook(url: str, data: dict):
+    payload = {
+        "id": str(uuid.uuid4()),
+        "event": "request.generated",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "data": data,
+    }
+    body = json.dumps(payload).encode()
+    signature = hmac.new(
+        os.getenv("WEBHOOK_SECRET", "").encode(), body, hashlib.sha256
+    ).hexdigest()
+    try:
+        httpx.post(
+            url,
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Webhook-Event": "request.generated",
+                "X-Webhook-Signature": f"sha256={signature}",
+            },
+            timeout=10,
+        )
+    except httpx.HTTPError as e:
+        print(f"Webhook delivery failed: {e}")
 
 @app.post("/generate", response_model=GeneratedRequest, dependencies=[Depends(require_api_key)])
 def generate(data: PromptIn):
@@ -86,7 +127,11 @@ def generate(data: PromptIn):
                         response_schema=GeneratedRequest,
                     ),
                 )
-                return response.parsed
+                result = response.parsed
+                print("webhook_url received:", data.webhook_url)
+                if data.webhook_url:
+                    send_webhook(data.webhook_url, result.model_dump())
+                return result
             except errors.ServerError as e:
                 # 5xx (e.g. 503 overloaded): short wait, retry once, then next model
                 last_error = e
