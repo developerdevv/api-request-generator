@@ -1,3 +1,6 @@
+import secrets
+from fastapi import Depends, Security
+from fastapi.security import APIKeyHeader
 import os
 import time
 from typing import Literal, Optional
@@ -15,6 +18,21 @@ client = genai.Client(
 )
 
 app = FastAPI(title="API Request Generator")
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def require_api_key(key: str = Security(api_key_header)):
+    if not key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Send it in the X-API-Key header.",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
+    valid_keys = [k.strip() for k in os.getenv("API_KEYS", "").split(",") if k.strip()]
+    if not any(secrets.compare_digest(key, v) for v in valid_keys):
+        raise HTTPException(status_code=403, detail="Invalid API key.")
+    return key
 
 
 class PromptIn(BaseModel):
@@ -53,7 +71,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/generate", response_model=GeneratedRequest)
+@app.post("/generate", response_model=GeneratedRequest, dependencies=[Depends(require_api_key)])
 def generate(data: PromptIn):
     last_error = None
     for model in MODELS:  # try the main model first, then the fallback
