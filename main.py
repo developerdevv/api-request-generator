@@ -28,7 +28,15 @@ client = genai.Client(
     http_options=types.HttpOptions(timeout=30000),  # 30 seconds, in milliseconds
 )
 
-app = FastAPI(title="API Request Generator")
+app = FastAPI(
+    title="API Request Generator",
+    version="1.0.0",
+    description=(
+        "Turn a plain-English description into a ready-to-run HTTP API request "
+        "using Gemini. Authenticate with the X-API-Key header. "
+        "Optionally pass webhook_url to receive the result as a signed webhook."
+    ),
+)
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -88,7 +96,7 @@ MODELS = [
 def home():
     return INDEX_HTML
 
-@app.get("/health")
+@app.get("/health", tags=["System"])
 def health():
     return {"status": "ok"}
 
@@ -117,7 +125,7 @@ def send_webhook(url: str, data: dict):
     except httpx.HTTPError as e:
         print(f"Webhook delivery failed: {e}")
 
-@app.post("/generate", response_model=GeneratedRequest, dependencies=[Depends(require_api_key)])
+@app.post("/generate", response_model=GeneratedRequest, dependencies=[Depends(require_api_key)], tags=["Generator"])
 def generate(data: PromptIn):
     last_error = None
     for model in MODELS:  # try the main model first, then the fallback
