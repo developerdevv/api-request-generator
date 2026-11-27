@@ -1,3 +1,5 @@
+from fastapi.responses import HTMLResponse
+from ui import INDEX_HTML
 import hashlib
 import hmac
 import json
@@ -82,6 +84,9 @@ MODELS = [
     os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"),
 ]
 
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def home():
+    return INDEX_HTML
 
 @app.get("/health")
 def health():
